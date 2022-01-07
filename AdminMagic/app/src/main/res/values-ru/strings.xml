@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+	<string name="app_name">AdminMagic</string>
+	<string name="please_wait">Please wait..</string>
+    <string name="tickets">Tickets</string>
+    <string name="tickets_text">Tickets</string>
+    <string name="type_message_hint_text">Type a message</string>
+    <string name="admin_console_text">Admin Console</string>
+</resources>
