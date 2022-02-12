@@ -1,20 +1,30 @@
 package com.boris.expert.adminmagic.view.activities
 
+import android.Manifest
+import android.app.Activity
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.provider.MediaStore
+import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.widget.ImageButton
+import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.boris.expert.adminmagic.R
 import com.boris.expert.adminmagic.adapters.ChatAdapter
+import com.boris.expert.adminmagic.interfaces.UploadFileCallback
 import com.boris.expert.adminmagic.model.Message
 import com.boris.expert.adminmagic.model.SupportTicket
 import com.boris.expert.adminmagic.utils.Constants
+import com.boris.expert.adminmagic.utils.FileUtils
 import com.boris.expert.adminmagic.utils.WrapContentLinearLayoutManager
 import com.google.android.material.textfield.TextInputEditText
 import com.google.firebase.auth.FirebaseAuth
@@ -30,8 +40,15 @@ class ChatActivity : BaseActivity(), View.OnClickListener {
     private lateinit var chatMessageRecyclerView: RecyclerView
     private lateinit var chatBoxTextInputField: TextInputEditText
     private lateinit var sendMessageBtn: ImageButton
+    private lateinit var imageUploadBtn: ImageButton
     private var chatList = mutableListOf<Message>()
     private lateinit var adapter: ChatAdapter
+    private var name = ""
+    private var isAdminReplied = false
+    private var userId = ""
+    private var messageType = "text"
+    private var selectedImageServerUrl: String = ""
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,14 +68,27 @@ class ChatActivity : BaseActivity(), View.OnClickListener {
         chatBoxTextInputField = findViewById(R.id.chat_box_input_field)
         sendMessageBtn = findViewById(R.id.chat_send_btn)
         sendMessageBtn.setOnClickListener(this)
+        imageUploadBtn = findViewById(R.id.image_send_btn)
+        imageUploadBtn.setOnClickListener(this)
         if (intent != null && intent.hasExtra("S_TICKET")) {
             supportTicket = intent.getSerializableExtra("S_TICKET") as SupportTicket
         }
 
-        chatMessageRecyclerView.layoutManager = WrapContentLinearLayoutManager(context,RecyclerView.VERTICAL,false)
+        val wrapContentLinearLayoutManager =
+            WrapContentLinearLayoutManager(context, RecyclerView.VERTICAL, false)
+        wrapContentLinearLayoutManager.stackFromEnd = true
+        chatMessageRecyclerView.layoutManager = wrapContentLinearLayoutManager
         chatMessageRecyclerView.hasFixedSize()
         adapter = ChatAdapter(context, chatList as ArrayList<Message>)
         chatMessageRecyclerView.adapter = adapter
+
+        if (auth.currentUser != null) {
+            name = auth.currentUser!!.displayName as String
+            userId = auth.currentUser!!.uid
+            if (name.isEmpty()) {
+                name = "Agent"
+            }
+        }
     }
 
     // THIS FUNCTION WILL RENDER THE ACTION BAR/TOOLBAR
@@ -104,6 +134,15 @@ class ChatActivity : BaseActivity(), View.OnClickListener {
                         if (chatList.isNotEmpty()) {
                             adapter.notifyItemRangeChanged(0, chatList.size)
                             chatMessageRecyclerView.scrollToPosition(chatList.size)
+                            for (i in 0 until chatList.size) {
+                                val detail = chatList[i]
+                                if (detail.userId == userId) {
+                                    isAdminReplied = true
+                                    break
+                                } else {
+                                    isAdminReplied = false
+                                }
+                            }
                         }
                     } else {
                         adapter.notifyDataSetChanged()
@@ -119,7 +158,18 @@ class ChatActivity : BaseActivity(), View.OnClickListener {
     override fun onClick(v: View?) {
         when (v!!.id) {
             R.id.chat_send_btn -> {
-                sendMessage()
+                sendMessage(messageType)
+            }
+            R.id.image_send_btn -> {
+                if (ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.READ_EXTERNAL_STORAGE
+                    ) == PackageManager.PERMISSION_GRANTED
+                ) {
+                    getImageFromGallery()
+                } else {
+                    requestPermissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
+                }
             }
             else -> {
 
@@ -127,17 +177,87 @@ class ChatActivity : BaseActivity(), View.OnClickListener {
         }
     }
 
-    private fun sendMessage() {
+    private val requestPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted: Boolean ->
+            if (isGranted) {
+                // Permission is granted. Continue the action or workflow in your
+                // app.
+                getImageFromGallery()
+            } else {
+                // Explain to the user that the feature is unavailable because the
+                // features requires a permission that the user has denied. At the
+                // same time, respect the user's decision. Don't link to system
+                // settings in an effort to convince the user to change their
+                // decision.
+                showAlert(context, "Read External Storage permission is necessary to upload image!")
+            }
+        }
+
+    private fun getImageFromGallery() {
+        val fileIntent =
+            Intent(Intent.ACTION_GET_CONTENT, MediaStore.Images.Media.INTERNAL_CONTENT_URI)
+        fileIntent.type = "image/*"
+        resultLauncher.launch(fileIntent)
+
+    }
+
+    private var resultLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+
+            // THIS LINE OF CODE WILL CHECK THE IMAGE HAS BEEN SELECTED OR NOT
+            if (result.resultCode == Activity.RESULT_OK) {
+                val data: Intent? = result.data
+                data?.let { oldData ->
+                    val path = oldData.data//FileUtils.getRealPathFromURI(context, oldData.data!!)
+                    val realPath: String? = FileUtils.getRealPathFromURI(context, path!!)
+                    startLoading(context)
+                    uploadImageOnFirebaseStorage("ChatImages/$userId",realPath!!,object :UploadFileCallback{
+                        override fun onSuccess(url: String) {
+                            dismiss()
+                            Toast.makeText(context,"Image uploaded successfully!",Toast.LENGTH_SHORT).show()
+                            selectedImageServerUrl = url
+                            messageType = "image"
+                            sendMessage(messageType)
+                            messageType = "text"
+                        }
+
+                    })
+                }
+            }
+        }
+
+    private fun sendMessage(type: String) {
         val message = chatBoxTextInputField.text.toString().trim()
-        if (message.isNotEmpty()) {
+        if (message.isNotEmpty() || selectedImageServerUrl.isNotEmpty()) {
             val id = databaseReference.push().key.toString()
-            val messageItem =
-                Message(id, Constants.firebaseUserId, message, System.currentTimeMillis())
+            val timeStamp = System.currentTimeMillis()
+            val messageItem = if (type == "text") {
+                Message(id, Constants.firebaseUserId, messageType,message, timeStamp)
+            } else {
+                Message(
+                    id,
+                    Constants.firebaseUserId,
+                    messageType,
+                    selectedImageServerUrl,
+                    timeStamp
+                )
+            }
+
             databaseReference.child(Constants.supportChat).child(supportTicket!!.id).child(id)
                 .setValue(messageItem).addOnSuccessListener {
                     chatBoxTextInputField.setText("")
+                    selectedImageServerUrl = ""
+                    chatMessageRecyclerView.scrollToPosition(chatList.size - 1)
+                    val hashMap = HashMap<String, Any>()
+                    hashMap["lastReply"] = timeStamp
+                    hashMap["lastReplyBy"] = name
+                    if (isAdminReplied && supportTicket!!.status == "open") {
+                        hashMap["status"] = "pending"
+                    }
+                    databaseReference.child(Constants.ticketsReference).child(supportTicket!!.userId).child(supportTicket!!.id)
+                        .updateChildren(hashMap)
                 }.addOnFailureListener {
-
+                 Log.d("TEST199",it.localizedMessage!!)
                 }
         }
     }

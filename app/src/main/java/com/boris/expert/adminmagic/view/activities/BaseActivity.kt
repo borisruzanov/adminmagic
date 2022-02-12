@@ -3,6 +3,7 @@ package com.boris.expert.adminmagic.view.activities
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.text.format.DateFormat
@@ -13,7 +14,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
 import com.boris.expert.adminmagic.R
+import com.boris.expert.adminmagic.interfaces.UploadFileCallback
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.storage.FirebaseStorage
+import java.io.File
 import java.util.*
 
 
@@ -60,7 +65,7 @@ open class BaseActivity : AppCompatActivity() {
         // THIS FUNCTION WILL RETURN THE DATE TIME STRING FROM TIMESTAMP
         fun getDateTimeFromTimeStamp(timeStamp: Long): String {
             val c = Date(timeStamp)
-            val df = SimpleDateFormat("yyyy-MM-dd kk:mm a", Locale.getDefault())
+            val df = SimpleDateFormat("yyyy-MM-dd kk:mm:ss a", Locale.getDefault())
             return df.format(c).toUpperCase(Locale.ENGLISH)
         }
 
@@ -157,6 +162,30 @@ open class BaseActivity : AppCompatActivity() {
             imm.hideSoftInputFromWindow(view.windowToken, 0)
         }
 
+        fun uploadImageOnFirebaseStorage(referenceName:String,imagePath:String,listener: UploadFileCallback){
+            val storageReference = FirebaseStorage.getInstance().reference
+            if (FirebaseAuth.getInstance().currentUser != null) {
+
+                val file = Uri.fromFile(File(imagePath))
+
+                val fileRef = storageReference.child("$referenceName/${System.currentTimeMillis()}.jpg")
+                val uploadTask = fileRef.putFile(file)
+
+                uploadTask.continueWithTask { task ->
+                    if (!task.isSuccessful) {
+                        task.exception?.let {
+                            throw it
+                        }
+                    }
+                    fileRef.downloadUrl
+                }.addOnCompleteListener { task ->
+                    if (task.isSuccessful) {
+                        val downloadUri = task.result
+                        listener.onSuccess(downloadUri.toString())
+                    }
+                }
+            }
+        }
 
     }
 

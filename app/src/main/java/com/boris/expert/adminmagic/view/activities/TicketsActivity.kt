@@ -2,9 +2,11 @@ package com.boris.expert.adminmagic.view.activities
 
 import android.content.Context
 import android.content.Intent
-import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.view.MenuItem
+import android.view.View
+import android.widget.AdapterView
+import androidx.appcompat.widget.AppCompatSpinner
 import androidx.appcompat.widget.Toolbar
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -78,34 +80,96 @@ class TicketsActivity : BaseActivity(), TicketsAdapter.OnItemClickListener {
 
     private fun getAllTickets() {
         startLoading(context)
-        databaseReference.child(Constants.ticketsReference).orderByChild("timeStamp")
-            .addListenerForSingleValueEvent(object : ValueEventListener {
-                override fun onDataChange(snapshot: DataSnapshot) {
-                    dismiss()
-                    if (snapshot.hasChildren()) {
-                        ticketList.clear()
-                        for (dataSnap: DataSnapshot in snapshot.children) {
-                            ticketList.add(dataSnap.getValue(SupportTicket::class.java) as SupportTicket)
-                        }
 
-                        if (ticketList.isNotEmpty()) {
-                            adapter.notifyItemRangeChanged(0, ticketList.size)
-                        }
-                    } else {
-                        adapter.notifyDataSetChanged()
+        databaseReference.child(Constants.ticketsReference).addListenerForSingleValueEvent(object :ValueEventListener{
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val tempKeyList = mutableListOf<String>()
+                if (snapshot.hasChildren()) {
+                    for (dataSnap: DataSnapshot in snapshot.children) {
+                        tempKeyList.add(dataSnap.key!!)
                     }
-                }
+                    if (tempKeyList.isNotEmpty()) {
+                        ticketList.clear()
+                        for (i in 0 until tempKeyList.size) {
+                            val key = tempKeyList[i]
+                            databaseReference.child(Constants.ticketsReference).child(key).orderByChild("timeStamp")
+                                .addListenerForSingleValueEvent(object : ValueEventListener{
+                                    override fun onDataChange(snapshot: DataSnapshot) {
+                                        dismiss()
+                                        if (snapshot.hasChildren()) {
+                                            for (dataSnap: DataSnapshot in snapshot.children) {
+                                                ticketList.add(dataSnap.getValue(SupportTicket::class.java) as SupportTicket)
+                                            }
 
-                override fun onCancelled(error: DatabaseError) {
+                                            if (ticketList.isNotEmpty()) {
+                                                adapter.notifyItemRangeChanged(0, ticketList.size)
+                                            }
+                                        } else {
+                                            adapter.notifyDataSetChanged()
+                                        }
+                                    }
+
+                                    override fun onCancelled(error: DatabaseError) {
+
+                                    }
+
+                                })
+                        }
+                    }
+                    else{
+                        dismiss()
+                    }
 
                 }
-            })
+                else{
+                    dismiss()
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                dismiss()
+            }
+
+        })
+
+//        databaseReference.child(Constants.ticketsReference).orderByChild("timeStamp")
+//            .addListenerForSingleValueEvent(object : ValueEventListener {
+//                override fun onDataChange(snapshot: DataSnapshot) {
+//                    dismiss()
+//                    if (snapshot.hasChildren()) {
+//                        ticketList.clear()
+//                        for (dataSnap: DataSnapshot in snapshot.children) {
+//                            ticketList.add(dataSnap.getValue(SupportTicket::class.java) as SupportTicket)
+//                        }
+//
+//                        if (ticketList.isNotEmpty()) {
+//                            adapter.notifyItemRangeChanged(0, ticketList.size)
+//                        }
+//                    } else {
+//                        adapter.notifyDataSetChanged()
+//                    }
+//                }
+//
+//                override fun onCancelled(error: DatabaseError) {
+//
+//                }
+//            })
     }
 
     override fun onItemClick(position: Int) {
         val item = ticketList[position]
-        startActivity(Intent(context,ChatActivity::class.java).apply {
-            putExtra("S_TICKET",item)
+        startActivity(Intent(context, ChatActivity::class.java).apply {
+            putExtra("S_TICKET", item)
         })
+    }
+
+    override fun onItemStatusDropDown(position: Int, status:String) {
+        val item = ticketList[position]
+        item.status = status
+        adapter.notifyItemChanged(position)
+        val hashMap = HashMap<String, Any>()
+        hashMap["status"] = status
+        databaseReference.child(Constants.ticketsReference).child(item.userId).child(item.id)
+            .updateChildren(hashMap)
     }
 }
